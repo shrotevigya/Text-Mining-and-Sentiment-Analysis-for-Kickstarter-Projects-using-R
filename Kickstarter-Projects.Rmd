@@ -1,0 +1,436 @@
+---
+title: "Assignment 3: Kickstarter Projects"
+author: Vigya Shrote
+date: 04/04/2018
+always_allow_html: yes
+output: 
+  html_document:
+    keep_md: true
+---
+
+Text Mining Kickstarter Projects
+================================
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r package,include=FALSE}
+packages <- c("devtools","knitr","tidyverse","widgetframe","readr",
+              "leaflet","RColorBrewer","countrycode",
+              "leaflet.extras")
+
+packages <- lapply(packages, FUN = function(x) {
+  if(!require(x, character.only = TRUE)) {
+    install.packages(x)
+  library(x, character.only = TRUE)
+  }
+}
+)
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(readxl)
+library(tidyverse)
+library(plotly)
+library(ggthemes)
+library(gridExtra)
+library(manipulateWidget)
+library(ggplot2)
+library(knitr)
+library(DT)
+library(maps)
+library(dplyr)
+library(RColorBrewer)
+library(plyr)
+library(fossil)
+library(geosphere)
+library(tm)       
+library(quanteda) 
+library(tidytext)
+library(stringr)
+library(SnowballC)
+library(wordcloud)
+library(stringi) 
+library(tidytext)
+library(plotrix)
+
+
+opts_chunk$set(fig.path="images/",
+               cache.path="cache/",
+               cache=FALSE,
+               echo=FALSE,
+               message=FALSE,
+               warning=FALSE) 
+
+```
+
+
+## Overview
+
+Kickstarter is an American public-benefit corporation based in Brooklyn, New York, that maintains a global crowd funding platform focused on creativity.  The company's stated mission is to "help bring creative projects to life". 
+
+Kickstarter has reportedly received more than $1.9 billion in pledges from 9.4 million backers to fund 257,000 creative projects, such as films, music, stage shows, comics, journalism, video games, technology and food-related projects.
+
+For this assignment, I am asking you to analyze the descriptions of kickstarter projects to identify commonalities of successful (and unsuccessful projects) using the text mining techniques we covered in the past two lectures. 
+
+## Data
+
+The dataset for this assignment is taken from [webroboto.io ???s repository](https://webrobots.io/kickstarter-datasets/). They developed a scrapper robot that crawls all Kickstarter projects monthly since 2009. We will just take data from the most recent crawl on 2018-02-15.
+
+To simplify your task, I have downloaded the files and partially cleaned the scraped data. In particular, I converted several JSON columns, corrected some obvious data issues, and removed some variables that are not of interest (or missing frequently). I have also  subsetted the data to only contain projects originating in the United States (to have only English language and USD denominated projects).
+
+The data is contained in the file `kickstarter_projects.csv` and contains about 150,000 projects and about 20 variables.
+z
+## Tasks for the Assignment
+
+### 1. Identifying Successful Projects
+
+#### a) Success by Category
+#Using Achievement Ratio to identify the successful projects 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+kick_starter<- read_csv("./kickstarter_projects_1.csv")
+
+#kick_starter <- readLines("kick_starter.txt", sep="/")
+#kick_starter <- readLines("kick_starter.txt", sep="/")
+#kick_starter <- stri_enc_toutf8(kick_starter, is_unknown_8bit = T)
+
+na.omit(kick_starter)
+#remove the duplicate blurbs from kickstarter csv 
+kick_starter1<- kick_starter[!duplicated(kick_starter$id), ]
+AR<- (kick_starter1$pledged/kick_starter1$goal)*100
+kick_starter1$AR<-AR
+
+AR_plot_table<- aggregate( AR ~ top_category,kick_starter1, mean)
+
+
+plot_category<- ggplot(data= AR_plot_table, aes(x= top_category, y= AR))+geom_bar(position="dodge", stat="identity")+theme_economist()+theme(axis.text.x = element_text(angle=90, size=rel(0.8), hjust=1))+ggtitle("Achievement Ratio vs Categories")+ylab("Achievement Ratio") +xlab("Categories")
+
+#interactive
+ggplotly(plot_category)
+```
+
+### **BONUS ONLY:** b) Success by Location
+
+
+#### Successful projects by states:
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+us_states<- read_csv("./us.csv")
+
+kick_starter1$location <- paste(kick_starter1$location_town, kick_starter1$location_state)
+
+merge_df<-merge(kick_starter1,us_states,by="location")
+merge_df<- arrange(merge_df,desc(AR)) 
+
+successful_df<- filter(merge_df,state=="successful")
+state_count<- count(successful_df, "state_name")
+state_count<- arrange(state_count,desc(freq))
+
+
+plot_s_states<- ggplot(data= state_count, aes(x= state_name, y= freq))+geom_bar(position="dodge", stat="identity")+theme_economist()+theme(axis.text.x = element_text(angle=90, size=rel(0.8), hjust=1))+ggtitle("Successful projects by states")+ylab("Frequency") +xlab("States")
+ggplotly(plot_s_states)
+
+# top 50 cities 
+town_plot_table<- aggregate( AR ~ location_town.x,merge_df, mean )
+town_plot_table<- arrange(town_plot_table,desc(AR))
+top_50_cities<-head(town_plot_table,50)
+
+plot_50_cities<- ggplot(data=top_50_cities, aes(x= location_town.x, y= AR))+geom_bar(position="dodge", stat="identity")+theme_economist()+theme(axis.text.x = element_text(angle=90, size=rel(0.8), hjust=1))+ggtitle("Top 50 Cities")+ylab("Achievement Ratio") +xlab("City Name")
+
+ggplotly(plot_50_cities)
+
+#map:
+state_map<-merge(state_count,merge_df,by="state_name")
+state_map<- state_map[!duplicated(state_map$state_name), ]
+
+city_map<- merge(top_50_cities,merge_df, by="location_town.x")
+city_map<- city_map[!duplicated(city_map$location_town.x), ]
+
+pop1<- paste("State Name:", state_map$state_name, "<br/>")
+pop2<- paste("City Name:", city_map$location_town.x, "<br/>")
+
+map_innovative<- leaflet() %>%setView(lng = -95.7129, lat = 37.0902, zoom = 3) %>% addTiles() %>% addCircleMarkers(data=state_map,lng = ~lng, lat = ~lat,color="blue",popup =pop1 ) %>% addCircleMarkers(data=city_map,lng = ~lng, lat = ~lat, radius = 5, stroke = 2, opacity = 0.7,popup = pop2,color="orange")%>% addProviderTiles(providers$Stamen.Toner)
+
+map_innovative
+```
+
+
+### 2. Writing your success story
+
+#### a) Cleaning the Text and Word Cloud
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+top_df<-kick_starter1[order(-AR),] 
+top_df<-filter(top_df, state=="successful")
+top_1000<-head(top_df,1000)
+
+last_df<- kick_starter1[order(AR),] 
+last_df<-filter(last_df, state=="failed")
+last_1000<- head(last_df,1000)
+
+top1000_corpus_blurb <- Corpus(VectorSource(top_1000$blurb))
+last1000_corpus_blurb <- Corpus(VectorSource(last_1000$blurb))
+
+clean_corpus <- function(corpus){
+  corpus <- tm_map(corpus, content_transformer(function(x) gsub(x, pattern = "<br>", replacement = "")))
+  corpus <- tm_map(corpus, content_transformer(function(x) gsub(x, pattern = "\n", replacement = "")))
+  corpus <- tm_map(corpus, content_transformer(function(x) gsub(x, pattern = "/><br", replacement = "")))
+  corpus <- tm_map(corpus, content_transformer(function(x) tolower(x)))
+  corpus <- tm_map(corpus, removeNumbers)
+  corpus <- tm_map(corpus, removePunctuation)
+  corpus <- tm_map(corpus, removeWords, stopwords("en"))
+  corpus <- tm_map(corpus, stripWhitespace)
+  return(corpus)
+}
+
+top1000_corpus_blurb_clean <- clean_corpus(top1000_corpus_blurb)
+
+last1000_corpus_blurb_clean <- clean_corpus(last1000_corpus_blurb)
+
+top1000_corpus_blurb_stemmed <- tm_map(top1000_corpus_blurb_clean, stemDocument)
+
+last1000_corpus_blurb_stemmed <- tm_map(last1000_corpus_blurb_clean, stemDocument)
+
+stemCompletion2 <- function(x, dictionary) {
+   x <- unlist(strsplit(as.character(x), " "))
+   x <- x[x != ""]
+   x <- stemCompletion(x, dictionary=dictionary)
+   x <- paste(x, sep="", collapse=" ")
+   PlainTextDocument(stripWhitespace(x))
+}
+
+top_1000_comp<- lapply(top1000_corpus_blurb_stemmed,stemCompletion2,dictionary= top1000_corpus_blurb_clean)
+last_1000_comp<-lapply(last1000_corpus_blurb_stemmed,stemCompletion2,dictionary= last1000_corpus_blurb_clean)
+
+top_1000_comp_all <- as.VCorpus(top_1000_comp)
+last_1000_comp_all <- as.VCorpus(last_1000_comp)
+
+top_1000_comp_all_tfidf  <- tidy(DocumentTermMatrix(top_1000_comp_all, control = list(weighting = weightTfIdf)))
+
+last_1000_comp_all_tfidf  <- tidy(DocumentTermMatrix(last_1000_comp_all, control = list(weighting = weightTfIdf)))
+
+kick_starter_dtm1 <- DocumentTermMatrix(as.VCorpus(top_1000_comp_all))
+#kick_starter_dtm1
+
+kick_starter_m1.1 <- as.matrix(kick_starter_dtm1)
+dim(kick_starter_m1.1)
+
+kick_starter_dtm2 <- DocumentTermMatrix(as.VCorpus(last_1000_comp_all) )
+#kick_starter_dtm2
+kick_starter_m1.2 <- as.matrix(kick_starter_dtm2)
+dim(kick_starter_m1.2)
+
+#kick_starter_tdm3 <- TermDocumentMatrix(top_1000_comp_all)
+#kick_starter_tdm3
+#kick_starter_m2.1 <- as.matrix(kick_starter_tdm3)
+#dim(kick_starter_m2.1)
+
+#kick_starter_tdm4 <- TermDocumentMatrix(last_1000_comp_all)
+#kick_starter_tdm4
+#kick_starter_m2.2 <- as.matrix(kick_starter_tdm4)
+#dim(kick_starter_m2.2)
+
+kick_starter_td1<- tidy(kick_starter_dtm1)
+#head(kick_starter_td1)
+
+kick_starter_td2<- tidy(kick_starter_dtm2)
+#head(kick_starter_td2)
+
+kick_starter_tf_idf1 <-  kick_starter_td1
+#kick_starter_tf_idf1 <-  kick_starter_td1 %>% bind_tf_idf(term, document, count) %>% arrange(desc(tf_idf))
+kick_starter_tf_idf2 <-  kick_starter_td2
+#kick_starter_tf_idf2 <-  kick_starter_td2 %>% bind_tf_idf(term, document, count) %>% arrange(desc(tf_idf)) 
+
+#kick_starter_tf_idf1
+#kick_starter_tf_idf2
+
+#word cloud
+term_frequency_DT1 <- kick_starter_tf_idf1
+term_frequency_DT2 <- kick_starter_tf_idf2
+term_frequency_DT1$state<- "successful"
+term_frequency_DT2$state <- "unsuccessful"
+top10_term_frequency_DT1<- head(arrange(term_frequency_DT1,desc(count)),10)
+top10_term_frequency_DT2<- head(arrange(term_frequency_DT2,desc(count)),10)
+final_tf_idf<- rbind(top10_term_frequency_DT1,top10_term_frequency_DT2)
+
+tf_idf_merge_2000<- rbind(term_frequency_DT1,term_frequency_DT2)
+
+purple_orange <- brewer.pal(10, "PuOr")
+purple_orange <- purple_orange[-(1:2)]
+
+par(mar=c(1,1,1,1))
+```
+Word Cloud of top 1000
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(11)
+wordcloud(top_1000_comp_all_tfidf$term,top_1000_comp_all_tfidf$count,scale=c(4,.5),min.freq=1,max.words = 500, colors = purple_orange)
+```
+Word Cloud of last 1000
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(112)
+wordcloud(last_1000_comp_all_tfidf$term,last_1000_comp_all_tfidf$count,scale=c(4,.5),min.freq=1,max.words = 500, colors = purple_orange)
+
+```
+
+#### b) Success in words: 
+####Referred https://stats.stackexchange.com/questions/2455/how-to-make-age-pyramid-like-plot-in-r
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+common <- merge(term_frequency_DT1,term_frequency_DT2,by="term")
+common_final<- common[!duplicated(common$term), ]
+common_final<-arrange(common_final,desc(count.x))
+common_final<- head(common_final,20)
+
+
+library(plotrix)
+mcol<-color.gradient(c(0,0,0.5,1),c(0,0,0.5,1),c(1,1,0.5,1),18)
+ fcol<-color.gradient(c(1,1,0.5,1),c(0.5,0.5,0.5,1),c(0.5,0.5,0.5,1),18)
+ 
+p <- pyramid.plot(common_final$count.x, common_final$count.y,labels = common_final$term,top.labels = c("successful", " ", "unsuccessful"),main = "Words in Common",lxcol=mcol,rxcol=fcol,gap=1,show.values=TRUE)
+p
+```
+
+
+
+
+#### c) Simplicity as a virtue
+#### From the below plot we can see that the most successful projects(projects with highest AR) have an FRE range of 5 to 15. As we know that documents (in our case blurbs) with FRE range of 0-30 are the most difficult to read.
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+#textstat_readability(c(s1,s2,s3),measure=c('Flesch','Flesch.Kincaid','meanSentenceLength','meanWordSyllables'))
+
+kickstarter_success_Corpus <- corpus(top1000_corpus_blurb) 
+
+FRE_success <- textstat_readability(kickstarter_success_Corpus,measure =c('Flesch.Kincaid'))
+
+#FRE_success
+
+FRE_success$AR<- top_1000$AR
+
+plot_FRE_AR<- ggplot(data=FRE_success, aes(x=AR , y= Flesch.Kincaid))+geom_point(alpha=0.5, size=3)+ theme_economist()+theme(axis.text.x = element_text(angle=90, size=rel(0.8), hjust=1))+ggtitle("AR vs FRE")+ylab("FRE") +xlab("AR")
+ggplotly(plot_FRE_AR)
+
+```
+
+### 3. Sentiment
+
+
+
+#### a) Stay positive
+### From the below plot we can see that the most successful projects (projects with the highest AR) have a neutral tone i.e. tone value is zero. 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+pos <- read.table("/Users/vigyashrote/Desktop/DV/DV_NYU_course_material-master 4/Exercises/09_kickstarter/dictionaries/positive-words.txt", as.is=T)
+neg <- read.table("/Users/vigyashrote/Desktop/DV/DV_NYU_course_material-master 4/Exercises/09_kickstarter/dictionaries/negative-words.txt", as.is=T)
+#pos[1:15,]
+#neg[1:15,]
+
+# function just to do simply arithmetic
+sentiment <- function(words=c("really great good stuff bad")){
+  require(quanteda)
+  tok <- quanteda::tokens(words)
+  pos.count <- sum(tok[[1]]%in%pos[,1] + 1)
+  neg.count <- sum(tok[[1]]%in%neg[,1] + 1)
+  out <- (pos.count - neg.count)/(pos.count+neg.count)
+  return(out) 
+}
+
+for (i in 1:1000)
+{
+top_1000$Tone[i] <- sentiment(top_1000$blurb[i])
+}
+
+plot_sentiment<- ggplot(data=top_1000, aes(x=Tone , y= AR ))+geom_point(alpha=0.5, size=3)+ theme_economist()+theme(axis.text.x = element_text(angle=90, size=rel(0.8), hjust=1))+ggtitle("Tone of the Blurb vs AR")+ylab("AR") +xlab("Tone of the Blurb")
+ggplotly(plot_sentiment)
+```
+
+#### b) Positive vs negative:
+#### Referred: https://www.kaggle.com/elvinouyang/identifying-the-buzzwords-in-kickstarter-part-ii/code
+Comparision cloud 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+for (i in 1:1000)
+{
+last_1000$Tone[i] <- sentiment(last_1000$blurb[i])
+}
+
+top_last_2000<- rbind(top_1000, last_1000)
+
+top_last_2000$ToneType<- ifelse(((as.numeric(as.character(top_last_2000$Tone))) < 0), "Negative", "Positive")
+
+tryTolower = function(x)
+{
+  # create missing value
+  # this is where the returned value will be
+  y = NA
+  # tryCatch error
+  try_error = tryCatch(tolower(x), error = function(e) e)
+  # if not an error
+  if (!inherits(try_error, "error"))
+    y = tolower(x)
+  return(y)
+}
+
+replacePunctuation<- function(x){
+  gsub("[[:punct:]]+"," ",x)  
+}
+
+create_clean_corpus <- function(text_vector){
+  # Clean a text vector
+  text_corpus <- VCorpus(VectorSource(text_vector))
+  text_corpus_clean<-sapply(text_corpus, function(x) tryTolower(x))
+  text_corpus_clean <- VCorpus(VectorSource(text_corpus_clean))
+  text_corpus_clean <- tm_map(text_corpus_clean, content_transformer(tolower))
+  text_corpus_clean <- tm_map(text_corpus_clean, removeNumbers)
+  text_corpus_clean <- tm_map(text_corpus_clean, removeWords,c(stopwords()))
+  text_corpus_clean <- tm_map(text_corpus_clean, content_transformer(replacePunctuation))
+  text_corpus_clean <- tm_map(text_corpus_clean, stemDocument,language="english")
+  text_corpus_clean <- tm_map(text_corpus_clean, stripWhitespace)
+  return(text_corpus_clean)
+}
+
+top_last_2000_positive <- paste(top_last_2000$blurb[top_last_2000$ToneType =="Positive"],collapse = " ")
+top_last_2000_negative <- paste(top_last_2000$blurb[top_last_2000$ToneType == "Negative"],collapse = " ")
+corp_pos_neg <- c(top_last_2000_positive, top_last_2000_negative)
+all_blurbs <- create_clean_corpus(corp_pos_neg)
+all_blurbs_pos_neg <- TermDocumentMatrix(all_blurbs, control=list(weighting = weightTfIdf))
+colnames(all_blurbs_pos_neg) <- c("Positive", "Negative")
+all_blurbs_pos_neg <- as.matrix(all_blurbs_pos_neg)
+comparison.cloud(all_blurbs_pos_neg, colors = c("red", "blue"), max.words = 100)
+
+
+```
+
+
+
+#### c) Get in their mind
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+nrc_dictionary <- get_sentiments("nrc")
+joy11<- subset(nrc_dictionary, sentiment=="joy")
+fear11 <- subset(nrc_dictionary, sentiment=="fear")
+anger11 <- subset(nrc_dictionary, sentiment=="anger")
+anticipation11 <- subset(nrc_dictionary, sentiment=="anticipation")
+sadness11 <- subset(nrc_dictionary, sentiment=="sadness")
+surprise11 <- subset(nrc_dictionary, sentiment=="surprise")
+
+mood_sentiment <- function(words=c("really great good stuff bad")){
+  require(quanteda)
+  tok_mood <- quanteda::tokens(words)
+  joy.count <- sum(tok_mood[[1]]%in%joy11[,1])
+  sadness.count <- sum(tok_mood[[1]]%in%sadness11[,1])
+  fear.count <- sum(tok_mood[[1]]%in%fear11[,1])
+  surprise.count <- sum(tok_mood[[1]]%in%surprise11[,1])
+  anger.count <- sum(tok_mood[[1]]%in%anger11[,1])
+  anticipation.count <- sum(tok_mood[[1]]%in%anticipation11[,1])
+  out <- max(joy.count,sadness.count,fear.count,surprise.count,anger.count, anticipation.count)
+  return(out)
+}
+  
+for (i in 1:1000){top_1000$Mood_Sentiment[i] <- mood_sentiment(top_1000$blurb[i])}
+```
+  
+  
+  
+  
+  
+  
+
+
+
